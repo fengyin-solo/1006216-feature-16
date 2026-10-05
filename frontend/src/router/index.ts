@@ -12,6 +12,7 @@ const Displacement = () => import('@/views/displacement/index.vue')
 const Trashrack = () => import('@/views/trashrack/index.vue')
 const Overhaul = () => import('@/views/overhaul/index.vue')
 const Bearing = () => import('@/views/bearing/index.vue')
+const BearingTodos = () => import('@/views/bearing-todos/index.vue')
 const Cooling = () => import('@/views/cooling/index.vue')
 const Hydrology = () => import('@/views/hydrology/index.vue')
 const Flood = () => import('@/views/flood/index.vue')
@@ -36,6 +37,7 @@ const router = createRouter({
     { path: '/trashrack', name: 'trashrack', component: Trashrack },
     { path: '/overhaul', name: 'overhaul', component: Overhaul },
     { path: '/bearing', name: 'bearing', component: Bearing },
+    { path: '/bearing-todos', name: 'bearing-todos', component: BearingTodos },
     { path: '/cooling', name: 'cooling', component: Cooling },
     { path: '/hydrology', name: 'hydrology', component: Hydrology },
     { path: '/flood', name: 'flood', component: Flood },

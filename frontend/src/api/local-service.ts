@@ -1,6 +1,18 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+import {
+  activeRule,
+  allRules,
+  bearingSummary,
+  confirmRepair,
+  listRecords,
+  listRepairTodos,
+  registerBearing,
+  submitInspection,
+  toRowCells,
+} from '@/domain/bearing/service'
+import type { BearingRecord } from '@/domain/bearing/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -23,12 +35,65 @@ export function filterRows(rows: EntryRow[], filters: Record<string, string>): E
   )
 }
 
+/** 导轴承台账投影为通用 EntryRow：判级结果直接来自唯一实现，不再在页面另算。 */
+function bearingToEntryRow(record: BearingRecord): EntryRow {
+  return {
+    id: record.id,
+    status: record.status,
+    pending: record.repairTodo.open,
+    abnormal: record.status === '温度偏高' || record.status === '待检修',
+    轴承编号: record.bearingNo,
+    所属机组: record.unitNo,
+    上导温度: record.signals.upperTemp === null ? '缺测' : record.signals.upperTemp,
+    下导温度:
+      record.signals.lowerTemp === null
+        ? '缺测'
+        : record.signals.lowerTemp + (record.signals.lowerTempImputed ? '（推算）' : ''),
+    油位高度: record.signals.oilLevel === null ? '缺测' : record.signals.oilLevel,
+    振动数值: record.signals.vibration === null ? '缺测' : record.signals.vibration,
+    检测日期: record.signals.inspectedAt,
+    轴承状态: `${record.status}（${record.ruleVersion}）`,
+  }
+}
+
+function bearingEntries(): EntryRow[] {
+  return listRecords().map(bearingToEntryRow)
+}
+
 export function listEntries(key: string, filters: Record<string, string> = {}): PageResult {
+  if (key === 'bearing') {
+    const matched = filterRows(bearingEntries(), filters)
+    return { items: matched, total: matched.length, page: 1, size: matched.length }
+  }
   const matched = filterRows(listRows(key), filters)
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
 export function runAction(key: string, id: number, action: string): ActionResult {
+  if (key === 'bearing') {
+    // 导轴承动作统一走领域服务：判级、去重、待办、版本都在同一份实现里。
+    if (action === '提交检测') {
+      const record = listRecords().find((row) => row.id === id)
+      if (!record) {
+        return { ok: false, message: `没有找到编号为 ${id} 的导轴承` }
+      }
+      return submitInspection({
+        id,
+        date: new Date().toISOString().slice(0, 10),
+        time: new Date().toTimeString().slice(0, 5),
+        operator: '值班管理员',
+        upperTemp: record.signals.upperTemp,
+        lowerTemp: record.signals.lowerTemp,
+        oilLevel: record.signals.oilLevel,
+        vibration: record.signals.vibration,
+      })
+    }
+    if (action === '确认检修') {
+      return confirmRepair(id)
+    }
+    return { ok: false, message: `导轴承不提供「${action}」动作，判级由提交检测按统一界值自动完成` }
+  }
+
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
   if (!target) {
@@ -63,12 +128,25 @@ export function resetModule(key: string): PageResult {
 
 export function exportEntries(key: string): { filename: string; content: string } {
   const meta = moduleMeta(key)
+  if (key === 'bearing') {
+    // 另存（导出）与页面、动作共用同一实现：列与判定理由都来自领域，不再各写一份。
+    const header = [
+      '编号', '轴承编号', '所属机组', '上导温度', '下导温度', '油位高度',
+      '振动数值', '检测日期', '判定等级', '规则版本', '当前状态', '升级理由', '检修待办',
+    ]
+    const lines = [header.join(',')]
+    for (const record of listRecords()) {
+      const cells = toRowCells(record)
+      lines.push(header.map((column) => cells[column] ?? '').join(','))
+    }
+    return { filename: `${meta.name}-清单.csv`, content: `﻿${lines.join('\n')}` }
+  }
   const header = ['编号', ...meta.fields, '当前状态']
   const lines = [header.join(',')]
   for (const row of listRows(key)) {
     lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status].join(','))
   }
-  return { filename: `${meta.name}-清单.csv`, content: `\uFEFF${lines.join('\n')}` }
+  return { filename: `${meta.name}-清单.csv`, content: `﻿${lines.join('\n')}` }
 }
 
 export function downloadEntries(key: string): void {
@@ -86,7 +164,17 @@ export function downloadEntries(key: string): void {
 
 export function loadOverview(): OverviewResult {
   const rows = allRows()
+  const bearing = bearingSummary()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
+    if (meta.key === 'bearing') {
+      // 汇总条与台账记录同步：待处理=待检修待办数，异常量=偏高+待检修，与台账同源。
+      return {
+        name: meta.name,
+        created: bearing.total,
+        pending: bearing.repairTodoCount,
+        abnormal: bearing.elevated + bearing.pendingRepair,
+      }
+    }
     const entries = rows[meta.key] ?? []
     return {
       name: meta.name,
@@ -102,4 +190,16 @@ export function loadOverview(): OverviewResult {
     { label: '异常量', value: modules.reduce((sum, item) => sum + item.abnormal, 0) },
   ]
   return { cards, modules }
+}
+
+// —— 导轴承专用入口：页面、检修待办入口共用，避免业务判断散回组件 ——
+export const bearingApi = {
+  listEntries,
+  registerBearing,
+  submitInspection,
+  confirmRepair,
+  listRepairTodos,
+  bearingSummary,
+  allRules,
+  activeRule,
 }
