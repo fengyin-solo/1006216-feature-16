@@ -112,17 +112,9 @@ export const MODULES: ModuleMeta[] = [
     actionTargets: {"提交审批": "已批准", "开工检修": "检修中", "办理完工": "已完工"},
     metrics: ["待审批工作票", "检修中机组", "已完工检修"],
   },
-  {
-    key: "bearing",
-    name: "导轴承",
-    entity: "导轴承",
-    desc: "维护导轴承，围绕轴承编号、所属机组、上导温度、下导温度做登记、筛选与状态流转。",
-    fields: ["轴承编号", "所属机组", "上导温度", "下导温度", "油位高度", "振动数值", "检测日期", "轴承状态"],
-    statuses: ["正常", "温度偏高", "待检修", "已检修"],
-    actions: ["提交检测", "标记偏高", "确认检修"],
-    actionTargets: {"提交检测": "温度偏高", "标记偏高": "待检修", "确认检修": "已检修"},
-    metrics: ["正常轴承", "温度偏高轴承", "待检修轴承"],
-  },
+  // 导轴承已从通用模块框架移出：温度/油位/振动的判级曾散在页面、动作、导出三处，
+  // 现统一走 src/domain/bearing-policy.ts + src/api/bearing-service.ts，
+  // 页面 src/views/bearing/index.vue 与检修待办 src/views/repair-todos/index.vue 共用同一份实现。
   {
     key: "cooling",
     name: "技术供水",
